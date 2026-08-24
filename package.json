@@ -1,0 +1,27 @@
+{
+  "name": "tamperlens-mcp",
+  "version": "1.31.0",
+  "mcpName": "com.tamperlens/mcp",
+  "description": "MCP server for Tamperlens — ask whether a document was edited, whether its redactions held, and whether it is safe for a model to read, before it reaches your agent's context",
+  "keywords": ["mcp", "modelcontextprotocol", "pdf", "document-forensics", "prompt-injection", "redaction", "fraud-detection"],
+  "homepage": "https://tamperlens.com",
+  "repository": { "type": "git", "url": "git+https://github.com/haruodev/tamperlens-mcp.git" },
+  "bugs": "https://github.com/haruodev/tamperlens-mcp/issues",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "tamperlens-mcp": "dist/index.js" },
+  "files": ["dist/", "README.md"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}

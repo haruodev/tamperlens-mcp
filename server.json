@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.tamperlens/mcp",
+  "description": "Was this document edited, did its redactions hold, is it safe for a model to read — Tamperlens API.",
+  "repository": {
+    "url": "https://github.com/haruodev/tamperlens",
+    "source": "github"
+  },
+  "websiteUrl": "https://tamperlens.com",
+  "version": "1.31.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "tamperlens-mcp",
+      "version": "1.31.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "TAMPERLENS_API_KEY",
+          "description": "Optional. Without it the anonymous allowance applies (10 documents/hour); a free key from tamperlens.com/account raises it. compare_documents requires a key.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "TAMPERLENS_BASE_URL",
+          "description": "Optional. Defaults to the public deployment at https://tamperlens.com.",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
