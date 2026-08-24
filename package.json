@@ -9,7 +9,7 @@
   "bugs": "https://github.com/haruodev/tamperlens-mcp/issues",
   "license": "MIT",
   "type": "module",
-  "bin": { "tamperlens-mcp": "dist/index.js" },
+  "bin": { "tamperlens-mcp": "dist/mcp/index.js" },
   "files": ["dist/", "README.md"],
   "engines": { "node": ">=22" },
   "scripts": {

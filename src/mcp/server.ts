@@ -27,8 +27,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
-import { ENGINE_VERSION } from "./version.js";
-import { redactUntrustedPayloadsInBody } from "./redact-payload.js";
+import { ENGINE_VERSION } from "../engine/version.js";
+import { redactUntrustedPayloadsInBody } from "../engine/redact-payload.js";
 import * as z from "zod/v4";
 
 /** Matches the API's own cap (config.maxUploadMb). Checked before the upload so

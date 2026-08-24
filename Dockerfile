@@ -16,4 +16,4 @@ COPY package.json package-lock.json* ./
 RUN npm install --omit=dev --no-audit --no-fund
 COPY --from=build /app/dist ./dist
 # stdio MCP server: no port, no network needed to introspect.
-ENTRYPOINT ["node", "dist/index.js"]
+ENTRYPOINT ["node", "dist/mcp/index.js"]
