@@ -37,6 +37,7 @@
  * on evidence a future family adds, silently dropping facts a caller paid for.
  */
 import type { InspectionReport, Signal } from "./types.js";
+import { classifyInjection } from "./injection.js";
 
 /**
  * Evidence keys whose values are written by whoever wrote the document.
@@ -149,4 +150,59 @@ export function redactUntrustedPayloadsInBody(
     };
   });
   return touched ? { ...body, signals: next } : body;
+}
+
+/**
+ * The same guarantee — no attacker-authored payload reaches a model's context —
+ * for a `POST /api/v1/compare` body, which the two functions above do NOT cover.
+ *
+ * WHY A COMPARE REPORT NEEDS ITS OWN PASS. Those functions walk `signals[]` and
+ * elide the keys of a signal that flagged itself `payloadIsUntrusted`. A compare
+ * report has no `signals[]`: it carries the raw VALUES of `/Title`, `/Creator`,
+ * `/Producer` and the XMP fields in `metadata.fields[].original/candidate` (and
+ * the producer string in `original`/`candidate`, and font names in `structure`).
+ * `compare_documents` returns that body straight into the tool result, so a
+ * payload planted in `/Title` — which `inspect_document` detects and elides —
+ * would otherwise come back RAW through compare, using Tamperlens's own tool to
+ * deliver the injection with a trusted label. (`/api/v1/compare` has no
+ * `?redact=payload`, so this cannot be pushed server-side; it is done here.)
+ *
+ * NOT A SECOND ELISION RULE. The CRITERION is the identical one the injection
+ * families use to decide a value is attacker-authored: `classifyInjection` from
+ * `injection.ts`, the same classifier whose match sets `payloadIsUntrusted` in
+ * the first place. Any string in the body it judges instruction-shaped is
+ * replaced with the same `REDACTED` sentinel; everything else — the equality
+ * verdicts, the ancestry facts, ordinary metadata like "Microsoft Word" — is
+ * untouched, because the classifier does not fire on it. The walk is over the
+ * whole body rather than a hand-picked path so a field added to the compare
+ * report later inherits the guarantee instead of quietly reopening the hole.
+ *
+ * Returns the SAME OBJECT when nothing matched, so the common case is one scan.
+ */
+export function redactUntrustedPayloadsInCompareBody(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  let touched = false;
+  const walk = (value: unknown, depth: number): unknown => {
+    if (depth > MAX_DEPTH) return value;
+    if (typeof value === "string") {
+      if (classifyInjection(value) !== null) {
+        touched = true;
+        return REDACTED;
+      }
+      return value;
+    }
+    if (Array.isArray(value)) return value.map((item) => walk(item, depth + 1));
+    if (value !== null && typeof value === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+        out[key] = walk(inner, depth + 1);
+      }
+      return out;
+    }
+    return value;
+  };
+  const next = walk(body, 0) as Record<string, unknown>;
+  // So a caller can tell "no instruction-shaped metadata" from "it was elided".
+  return touched ? { ...next, payloadRedacted: true } : body;
 }
