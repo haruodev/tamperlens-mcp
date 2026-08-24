@@ -10,7 +10,13 @@
   "license": "MIT",
   "type": "module",
   "bin": { "tamperlens-mcp": "dist/mcp/index.js" },
-  "files": ["dist/", "README.md"],
+  "files": [
+    "dist/mcp/",
+    "dist/engine/redact-payload.js",
+    "dist/engine/injection.js",
+    "dist/engine/version.js",
+    "README.md"
+  ],
   "engines": { "node": ">=22" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
