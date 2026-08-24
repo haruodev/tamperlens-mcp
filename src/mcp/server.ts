@@ -64,12 +64,14 @@ import path from "node:path";
 import net from "node:net";
 import http from "node:http";
 import https from "node:https";
+import { randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { McpServer } from "@modelcontextprotocol/server";
 import { ENGINE_VERSION } from "../engine/version.js";
 import {
   redactUntrustedPayloadsInBody,
   redactUntrustedPayloadsInCompareBody,
+  redactInjectionShapedRecovery,
 } from "../engine/redact-payload.js";
 import {
   guardedLookup,
@@ -115,6 +117,47 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): McpConfig {
   };
 }
 
+/**
+ * Optional read allowlist. `readDocument` accepts any absolute path by design —
+ * the header comment spells that out — because the MCP host already gates each
+ * tool call behind user approval. `TAMPERLENS_ALLOWED_DIRS` lets an operator who
+ * wants belt-and-suspenders confine reads to an intake directory, turning "any
+ * file this process can read" into "files under these roots" so a prompt-injected
+ * agent cannot coax the tool into reading `~/.ssh/id_ed25519` or a stray `.env`.
+ *
+ * Empty/unset ⇒ unchanged behaviour (any absolute path). Roots are colon- or
+ * comma-separated absolute paths; each is realpath-resolved once so the
+ * containment check compares canonical paths and a symlink cannot be configured
+ * to widen the allowlist. A configured root that does not exist is dropped.
+ */
+let allowedDirsCache: string[] | undefined;
+async function allowedReadDirs(): Promise<string[]> {
+  if (allowedDirsCache !== undefined) return allowedDirsCache;
+  const raw = process.env.TAMPERLENS_ALLOWED_DIRS?.trim();
+  if (!raw) return (allowedDirsCache = []);
+  const candidates = raw
+    .split(/[:,]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && path.isAbsolute(s));
+  const resolved: string[] = [];
+  for (const dir of candidates) {
+    try {
+      resolved.push(await fs.realpath(dir));
+    } catch {
+      // A root that does not exist right now cannot contain anything; skip it
+      // rather than fail every read.
+    }
+  }
+  return (allowedDirsCache = resolved);
+}
+
+/** True when `realPath` is inside `root` (or is `root` itself). Both must be
+ * canonical (realpath-resolved) for this to be sound against `..` and symlinks. */
+function isWithin(root: string, realPath: string): boolean {
+  const rel = path.relative(root, realPath);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
 /** A tool result the model can read and, where it makes sense, recover from. */
 type ToolResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -156,6 +199,27 @@ async function readDocument(
   }
   if (!stat.isFile()) return { error: `${filePath} is not a file` };
   if (stat.size === 0) return { error: `${filePath} is empty` };
+
+  // Confine to the intake allowlist when one is configured. Compare CANONICAL
+  // paths (realpath both sides) so neither a `..` segment nor a symlink pointing
+  // out of an allowed root can escape it. Unset ⇒ no restriction.
+  const roots = await allowedReadDirs();
+  if (roots.length > 0) {
+    let real: string;
+    try {
+      real = await fs.realpath(filePath);
+    } catch {
+      return { error: `no file at ${filePath}` };
+    }
+    if (!roots.some((root) => isWithin(root, real))) {
+      return {
+        error:
+          `${filePath} is outside the directories this server is allowed to read ` +
+          "(TAMPERLENS_ALLOWED_DIRS). Move the file into an allowed directory or send it by url.",
+      };
+    }
+  }
+
   if (stat.size > MAX_UPLOAD_BYTES) {
     return {
       error:
@@ -476,8 +540,15 @@ async function postDocument(
    * a deployment too old to know the parameter, which is precisely the
    * configuration a self-hosting customer will have.
    */
+  // Two locks, both client-side because the MCP result IS a model's context.
+  // The first elides payloads from signals that flagged themselves untrusted
+  // (the injection-marker families). The second catches recovered text that its
+  // signal did NOT flag — redaction-exposure's hidden-under-a-rectangle text —
+  // and removes only the instruction-shaped part of it, so a hostile PDF cannot
+  // smuggle a prompt injection out through a redaction finding while a benign
+  // redaction failure still returns its words. See redact-payload.ts.
   const body = (await response.json()) as Record<string, unknown>;
-  return { report: redactUntrustedPayloadsInBody(body) };
+  return { report: redactInjectionShapedRecovery(redactUntrustedPayloadsInBody(body)) };
 }
 
 /** One-line human summary, so an agent that reads only `content` still gets the
@@ -815,11 +886,18 @@ export function createMcpServer(config: McpConfig = configFromEnv()): McpServer 
         );
       }
 
-      const boundary = `----tamperlens-mcp-${Date.now().toString(16)}`;
+      // Random boundary (not Date.now, which is guessable and can collide across
+      // two calls in the same millisecond) so it cannot appear in the payload by
+      // prediction. The filename is document-derived, so strip the three bytes
+      // that would break out of the quoted `filename="..."` header — `"` closes
+      // the quote, CR/LF start a new header line — before it is interpolated.
+      const boundary = `----tamperlens-mcp-${randomBytes(16).toString("hex")}`;
+      const safeName = (filename: string): string =>
+        filename.replace(/["\r\n]/g, "_");
       const part = (name: string, filename: string): Buffer =>
         Buffer.from(
           `--${boundary}\r\nContent-Disposition: form-data; name="${name}"; ` +
-            `filename="${filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`,
+            `filename="${safeName(filename)}"\r\nContent-Type: application/octet-stream\r\n\r\n`,
         );
       const body = Buffer.concat([
         part("original", original.name),

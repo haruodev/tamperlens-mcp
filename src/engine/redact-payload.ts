@@ -153,6 +153,85 @@ export function redactUntrustedPayloadsInBody(
 }
 
 /**
+ * Recovered-text keys a signal publishes WITHOUT flagging itself
+ * `payloadIsUntrusted`, so the key-based redactor above walks straight past
+ * them. `redaction-exposure` is the case that matters: it recovers text hidden
+ * under a drawn rectangle (`recovered`, and the per-run `text` preview), and it
+ * does not — and must not — flag itself untrusted, because `check_redaction`
+ * exists precisely to hand those words back to a human checking their own file.
+ */
+const RECOVERED_TEXT_KEYS: ReadonlySet<string> = new Set(["recovered", "text"]);
+
+/**
+ * Second lock for the MCP path over recovered document text that its own signal
+ * did NOT flag untrusted — the redaction-exposure gap.
+ *
+ * WHY THIS EXISTS SEPARATELY. `redactUntrustedPayloadsInBody` only touches
+ * signals that set `payloadIsUntrusted`; redaction-exposure deliberately does
+ * not, so its recovered words ride out unredacted. That is correct for
+ * `check_redaction` (a human checking their own document wants the words) but
+ * wrong for `inspect_document`, which is sold as a "is this file safe for a
+ * model to read?" pre-check: a hostile PDF can hide a prompt injection under a
+ * filled rectangle, redaction-exposure recovers it, and it lands verbatim in the
+ * model's context with Tamperlens's trusted label.
+ *
+ * WHAT IT ELIDES. Only strings the injection classifier judges instruction-
+ * shaped — the identical criterion the compare pass uses. The overwhelmingly
+ * common recovered content (an un-redacted name, SSN or address, which is what a
+ * redaction failure actually leaks) is not instruction-shaped, so it is
+ * untouched and `check_redaction` keeps its whole value; only text written to be
+ * read by a model is removed. Scoped to `RECOVERED_TEXT_KEYS` under each
+ * signal's evidence rather than a whole-body scan, so ordinary report prose
+ * cannot be caught. Returns the SAME OBJECT when nothing matched.
+ *
+ * NOTE: the REST `?redact=payload` opt-in has the same redaction-exposure gap;
+ * it is left as a follow-up because that path is an integrator opt-in, while the
+ * MCP result IS a model's context by definition and is the finding's scope.
+ */
+export function redactInjectionShapedRecovery(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  const signals = body.signals;
+  if (!Array.isArray(signals)) return body;
+  let touched = false;
+  const elideInKeys = (value: unknown, depth: number): unknown => {
+    if (depth > MAX_DEPTH || value === null || typeof value !== "object") return value;
+    if (Array.isArray(value)) return value.map((item) => elideInKeys(item, depth + 1));
+    const out: Record<string, unknown> = {};
+    for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+      if (RECOVERED_TEXT_KEYS.has(key)) {
+        if (typeof inner === "string" && classifyInjection(inner) !== null) {
+          touched = true;
+          out[key] = REDACTED;
+        } else if (Array.isArray(inner)) {
+          out[key] = inner.map((item) => {
+            if (typeof item === "string" && classifyInjection(item) !== null) {
+              touched = true;
+              return REDACTED;
+            }
+            return item;
+          });
+        } else {
+          out[key] = inner;
+        }
+      } else {
+        out[key] = elideInKeys(inner, depth + 1);
+      }
+    }
+    return out;
+  };
+  const next = signals.map((signal) => {
+    const evidence = (signal as { evidence?: unknown }).evidence;
+    if (evidence === null || typeof evidence !== "object") return signal;
+    return {
+      ...(signal as Record<string, unknown>),
+      evidence: elideInKeys(evidence, 0),
+    };
+  });
+  return touched ? { ...body, signals: next } : body;
+}
+
+/**
  * The same guarantee — no attacker-authored payload reaches a model's context —
  * for a `POST /api/v1/compare` body, which the two functions above do NOT cover.
  *

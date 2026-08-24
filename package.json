@@ -1,6 +1,6 @@
 {
   "name": "tamperlens-mcp",
-  "version": "1.35.0",
+  "version": "1.36.0",
   "mcpName": "com.tamperlens/mcp",
   "description": "MCP server for Tamperlens — ask whether a document was edited, whether its redactions held, and whether it is safe for a model to read, before it reaches your agent's context",
   "keywords": ["mcp", "modelcontextprotocol", "pdf", "document-forensics", "prompt-injection", "redaction", "fraud-detection"],
