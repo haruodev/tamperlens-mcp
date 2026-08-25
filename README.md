@@ -59,8 +59,10 @@ default, and the default reaches nothing internal).
 > **The `path` argument reads any local file and sends its bytes to the API.**
 > `inspect_document`, `triage_document`, `check_redaction` and
 > `compare_documents` read whatever local path they are given — there is no
-> directory sandbox and no extension filter, because reading a document off disk
-> is the whole job and an intake path is not knowable in advance. The bytes of
+> directory sandbox **by default** and no extension filter, because reading a
+> document off disk is the whole job and an intake path is not knowable in
+> advance. **Set `TAMPERLENS_ALLOWED_DIRS`** (env table below) to confine reads
+> to an intake directory; a symlink pointing out of a root is resolved and refused. The bytes of
 > that file are then transmitted to the configured Tamperlens deployment. A model
 > an attacker is steering could therefore name a private file (`~/.ssh/id_rsa`,
 > `~/.aws/credentials`) and cause its bytes to leave the machine. **Run this
