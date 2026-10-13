@@ -56,8 +56,14 @@ import { classifyInjection } from "./injection.js";
  * below redacts string arrays under a payload key as well as bare strings.
  * `authors` rides with it: a comment or revision author is a string the
  * document chose, exactly like a custom Info key's name.
+ *
+ * `before` and `after` (engine 1.42.0) are the values in
+ * `incremental-updates.evidence.textChanges`: typed tokens read off the page
+ * (money amounts only), filtered and capped in
+ * `revision-text.ts`, and still written by whoever wrote the document. A
+ * `null` (an added or removed value) stays `null`.
  */
-const PAYLOAD_KEYS: ReadonlySet<string> = new Set(["payload", "name", "recovered", "authors"]);
+const PAYLOAD_KEYS: ReadonlySet<string> = new Set(["payload", "name", "recovered", "authors", "before", "after"]);
 
 /** Replaces the value at a payload key. Kept as a constant so a consumer can
  * recognise an elided field rather than guess from an empty string. */

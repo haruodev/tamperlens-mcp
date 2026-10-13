@@ -30,6 +30,7 @@ month with no card.
 | `triage_document` | Is this worth ingesting, and what does it cost to open? The cheap pre-flight: structure, metadata, signatures and presence flags only — no per-page content walk — at a fraction of the I/O. Returns the risk band, the measured cost (bytes read, bytes expanded, expansion ratio) and a `triage` block naming the page-content families it did **not** check. A quiet triage is not a clean document — use it to route, then `inspect_document` for the full check. |
 | `check_redaction` | Did the redaction actually remove anything? Covering text with a black box hides it from a person and removes nothing from the file. |
 | `compare_documents` | Is this the same file as the original I already hold, unchanged? |
+| `inspect_case` | Do these documents of one case (three months of statements, a payslip and its statement) disagree with each other? One report per document, plus what they share that independent documents should not: the same file twice, one base file's `/ID` or font subset tags, the same creation second. Inconsistencies to review, never verdicts. Needs a key; a case of N documents costs N. Takes `paths` and/or `urls`, 2 to 10 in all. |
 
 Accepts PDF; Word, Excel and PowerPoint (`.docx`, `.xlsx`, `.pptx` and the
 macro-enabled twins); and JPEG, PNG, WebP, HEIC/HEIF and AVIF.
@@ -38,7 +39,7 @@ macro-enabled twins); and JPEG, PNG, WebP, HEIC/HEIF and AVIF.
 
 `inspect_document`, `check_redaction` and `compare_documents` (as
 `originalUrl`/`candidateUrl`) take **either** a local `path` **or** an http/https
-`url` — not both. A `url` is fetched **by this server, on your own machine, over
+`url` — not both. `inspect_case` takes lists of both (`paths`, `urls`). A `url` is fetched **by this server, on your own machine, over
 your own network**, and only the bytes are sent on to Tamperlens. That is why the
 option lives here and not on the REST API: a server-side fetch of a
 caller-supplied URL is an SSRF risk on the API host, whereas fetching from your
@@ -57,8 +58,8 @@ specific addresses with `TAMPERLENS_FETCH_ALLOW_IPS` (comma-separated; empty by
 default, and the default reaches nothing internal).
 
 > **The `path` argument reads any local file and sends its bytes to the API.**
-> `inspect_document`, `triage_document`, `check_redaction` and
-> `compare_documents` read whatever local path they are given — there is no
+> `inspect_document`, `triage_document`, `check_redaction`,
+> `compare_documents` and `inspect_case` read whatever local path they are given — there is no
 > directory sandbox **by default** and no extension filter, because reading a
 > document off disk is the whole job and an intake path is not knowable in
 > advance. **Set `TAMPERLENS_ALLOWED_DIRS`** (env table below) to confine reads
