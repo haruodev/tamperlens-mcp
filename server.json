@@ -7,19 +7,19 @@
     "source": "github"
   },
   "websiteUrl": "https://tamperlens.com",
-  "version": "1.36.0",
+  "version": "1.42.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "tamperlens-mcp",
-      "version": "1.36.0",
+      "version": "1.42.0",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "TAMPERLENS_API_KEY",
-          "description": "Optional. Without it the anonymous allowance applies (10 documents/hour); a free key from tamperlens.com/account raises it. compare_documents requires a key.",
+          "description": "Optional. Without it the anonymous allowance applies (10 documents/hour); a free key from tamperlens.com/account raises it. compare_documents and inspect_case require a key.",
           "isRequired": false,
           "isSecret": true,
           "format": "string"

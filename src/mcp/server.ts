@@ -8,8 +8,8 @@
  * can discover and a file path instead of a multipart body.
  *
  * WHAT IT IS NOT. There is no second engine here and no local analysis: every
- * tool below is a thin, honest wrapper over `POST /api/v1/inspect` and
- * `POST /api/v1/compare` on a running deployment. Keeping it thin is the point
+ * tool below is a thin, honest wrapper over `POST /api/v1/inspect`,
+ * `POST /api/v1/compare` and `POST /api/v1/case` on a running deployment. Keeping it thin is the point
  * — an MCP server that reimplemented any of the parsing would be a second
  * implementation to keep in step with the first, and it would drift.
  *
@@ -103,6 +103,13 @@ function fetchTimeoutMs(): number {
 const MAX_REDIRECTS = 5;
 
 const DEFAULT_BASE_URL = "https://tamperlens.com";
+
+/** `inspect_case` limits, matching POST /api/v1/case on the default
+ * deployment (src/routes/case.ts): at most ten documents, three uploads'
+ * worth together. Checked here so an oversized case costs a read, not a round
+ * trip; the server enforces its own either way. */
+const MAX_CASE_DOCUMENTS = 10;
+const MAX_CASE_TOTAL_BYTES = 3 * MAX_UPLOAD_BYTES;
 
 export interface McpConfig {
   baseUrl: string;
@@ -944,6 +951,138 @@ export function createMcpServer(config: McpConfig = configFromEnv()): McpServer 
         report,
         `${original.name} vs ${candidate.name}: ${relationship}` +
           (gloss[relationship] ? ` — ${gloss[relationship]}` : ""),
+      );
+    },
+  );
+
+  server.registerTool(
+    "inspect_case",
+    {
+      description:
+        "Inspect several documents of ONE case together (for example three months of bank " +
+        "statements, or a payslip and the statement it was paid into) and report what one " +
+        "file at a time cannot show: inconsistencies BETWEEN them. Each document gets the same " +
+        "report inspect_document returns; on top, the case reports `same-file` (the identical " +
+        "file sent twice), `same-base-file` (different files that keep one base file's " +
+        "permanent /ID or its whole set of font subset tags, which is what editing one real " +
+        "statement into several months leaves behind) and `shared-creation-instant` (different " +
+        "files created in the same second). These are inconsistencies to review, never " +
+        "verdicts: each has benign causes, and two genuine statements of the same bank are not " +
+        "flagged for sharing a template. Nothing is stored. Needs an API key; a case of N " +
+        "documents costs N.",
+      inputSchema: z.object({
+        paths: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Absolute paths to the documents on this machine. Max 10 MB each. Together with " +
+              "urls: 2 to 10 documents. In the result, documents are numbered paths first, " +
+              "then urls, in the order given.",
+          ),
+        urls: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "http:/https: URLs to fetch documents from. Fetched LOCALLY over this machine's " +
+              "network (not from the Tamperlens server); http/https only, redirects re-checked, " +
+              "max 10 MB each on the bytes received. Numbered after paths.",
+          ),
+      }),
+    },
+    async ({ paths, urls }) => {
+      const sources = [
+        ...(paths ?? []).map((p) => ({ path: p })),
+        ...(urls ?? []).map((u) => ({ url: u })),
+      ];
+      if (sources.length < 2 || sources.length > MAX_CASE_DOCUMENTS) {
+        return fail(
+          `inspect_case takes 2 to ${MAX_CASE_DOCUMENTS} documents (paths and urls together); ` +
+            `got ${sources.length}. For one document, use inspect_document.`,
+        );
+      }
+      if (!config.apiKey) {
+        return fail(
+          "inspect_case needs an API key: set TAMPERLENS_API_KEY. " +
+            "Each document in a case is metered as one document.",
+        );
+      }
+
+      const files: Array<{ bytes: Buffer; name: string }> = [];
+      let total = 0;
+      for (const [index, source] of sources.entries()) {
+        const file = await loadDocument(source);
+        if ("error" in file) return fail(`document ${index}: ${file.error}`);
+        total += file.bytes.length;
+        if (total > MAX_CASE_TOTAL_BYTES) {
+          return fail(
+            `the documents of one case may add up to ${MAX_CASE_TOTAL_BYTES / 1024 / 1024} MB; ` +
+              `this one is over that by document ${index}. Send fewer or smaller files.`,
+          );
+        }
+        files.push(file);
+      }
+
+      // Same multipart construction as compare_documents: a random boundary and
+      // a filename stripped of the bytes that would break out of its header.
+      const boundary = `----tamperlens-mcp-${randomBytes(16).toString("hex")}`;
+      const safeName = (filename: string): string => filename.replace(/["\r\n]/g, "_");
+      const chunks: Buffer[] = [];
+      for (const file of files) {
+        chunks.push(
+          Buffer.from(
+            `--${boundary}\r\nContent-Disposition: form-data; name="file"; ` +
+              `filename="${safeName(file.name)}"\r\nContent-Type: application/octet-stream\r\n\r\n`,
+          ),
+          file.bytes,
+          Buffer.from("\r\n"),
+        );
+      }
+      chunks.push(Buffer.from(`--${boundary}--\r\n`));
+
+      let response: Response;
+      try {
+        response = await fetch(`${config.baseUrl}/api/v1/case?redact=payload`, {
+          method: "POST",
+          headers: {
+            "content-type": `multipart/form-data; boundary=${boundary}`,
+            ...authHeaders(config),
+          },
+          body: new Uint8Array(Buffer.concat(chunks)),
+        });
+      } catch (err) {
+        return fail(`could not reach ${config.baseUrl}: ${(err as Error).message}`);
+      }
+      if (!response.ok) return fail(await describeHttpFailure(response));
+
+      const body = (await response.json()) as {
+        reports?: Array<Record<string, unknown>>;
+        crossDocument?: { findings?: Array<{ code?: string; documents?: number[] }> };
+      };
+      // The same two locks postDocument applies, per report: every report in a
+      // case lands in a model's context exactly as a single one would. An error
+      // slot has no signals and passes through unchanged.
+      const reports = (body.reports ?? []).map((report) =>
+        Array.isArray(report.signals)
+          ? redactInjectionShapedRecovery(redactUntrustedPayloadsInBody(report))
+          : report,
+      );
+      const findings = body.crossDocument?.findings ?? [];
+
+      const lines = reports.map((report, i) =>
+        typeof report.error === "string"
+          ? `[${i}] ${files[i]!.name}: not analysed (${report.error})`
+          : `[${i}] ${summarise(report, files[i]!.name)}`,
+      );
+      const crossLine =
+        findings.length === 0
+          ? "Across the case: no inconsistencies between the documents. That is not proof they " +
+            "are independent or authentic."
+          : "Across the case, inconsistencies to review (not verdicts): " +
+            findings.map((f) => `${f.code} [${(f.documents ?? []).join(", ")}]`).join("; ") +
+            ".";
+      return ok(
+        { documents: files.map((f) => f.name), reports, crossDocument: body.crossDocument ?? null },
+        `${lines.join("\n")}\n${crossLine}`,
       );
     },
   );
