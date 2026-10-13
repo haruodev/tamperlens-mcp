@@ -7,12 +7,12 @@
     "source": "github"
   },
   "websiteUrl": "https://tamperlens.com",
-  "version": "1.42.0",
+  "version": "1.43.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "tamperlens-mcp",
-      "version": "1.42.0",
+      "version": "1.43.0",
       "transport": {
         "type": "stdio"
       },

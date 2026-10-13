@@ -968,7 +968,8 @@ export function createMcpServer(config: McpConfig = configFromEnv()): McpServer 
         "statement into several months leaves behind) and `shared-creation-instant` (different " +
         "files created in the same second). These are inconsistencies to review, never " +
         "verdicts: each has benign causes, and two genuine statements of the same bank are not " +
-        "flagged for sharing a template. Nothing is stored. Needs an API key; a case of N " +
+        "flagged for sharing a template. Retention follows the key's account (a key set to " +
+        "`none` keeps nothing). Needs an API key; a case of N " +
         "documents costs N.",
       inputSchema: z.object({
         paths: z

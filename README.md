@@ -98,8 +98,17 @@ not get the sentence.
   caller's filesystem (or a URL fetched here) and read the bytes on this side.
   Base64 in a tool call would put megabytes of document into the context window
   to reach a service that needs the bytes, not the model.
-- **Nothing is stored.** Files are parsed in memory by the API and discarded
-  with the response.
+- **Retention follows the account behind the key.** Files are parsed in memory
+  by the API. Without `TAMPERLENS_API_KEY` (the anonymous allowance) nothing is
+  kept. With a key that belongs to an account whose history is on (the default
+  for accounts created since retention launched), the API keeps a short derived record
+  of each call (hashes, signal ids and the score; never the file, its name or
+  its text), and keeps the file itself only if the account opted in. The tool
+  result then carries the API's `retention` and `tenantMatches` blocks. To keep
+  nothing, set that key to `retention: none` with `PATCH /api/v1/retention`
+  from a signed-in dashboard session (the dashboard has no per-key switch); this
+  server does not send the per-call `X-Tamperlens-Retention` header. Every field is listed at
+  [tamperlens.com/privacy#retention](https://tamperlens.com/privacy#retention).
 
 ## Configuration
 
